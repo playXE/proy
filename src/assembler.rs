@@ -7,7 +7,9 @@ pub struct AssemblerLabel {
 
 impl Default for AssemblerLabel {
     fn default() -> Self {
-        Self { offset: u32::MAX }
+        Self {
+            offset: u32::max_value(),
+        }
     }
 }
 
@@ -17,7 +19,7 @@ impl AssemblerLabel {
     }
 
     pub const fn is_set(&self) -> bool {
-        self.offset != u32::MAX
+        self.offset != u32::max_value()
     }
 
     pub const fn label_at_offset(&self, offset: u32) -> Self {
@@ -68,6 +70,19 @@ impl AssemblerBuffer {
             std::ptr::copy_nonoverlapping(self.storage.as_ptr(), result, self.index);
         }
         protect(result, self.index, Access::ReadExecutable);
+        Some(result)
+    }
+    pub fn executable_writable_memory(&self) -> Option<*mut u8> {
+        if self.index == 0 {
+            return None;
+        }
+        let result = commit(align_usize(self.index, page_size()), true);
+        if result.is_null() {
+            return None;
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(self.storage.as_ptr(), result, self.index);
+        }
         Some(result)
     }
     /*pub fn put_integral<T: 'static + Sized + Copy + Clone>(&mut self, x: T) {

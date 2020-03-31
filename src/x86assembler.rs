@@ -57,11 +57,11 @@ const NO_BASE2: u8 = X86Gpr::R13 as u8;
 #[cfg(target_arch = "x86_64")]
 const HAS_SIB2: u8 = X86Gpr::R12 as u8;
 
-pub struct X86Assembler {
+pub struct X86InsFormatter {
     buffer: AssemblerBuffer,
 }
 
-impl X86Assembler {
+impl X86InsFormatter {
     fn put_modrm(&mut self, mode: ModRmMode, r: u8, rm: i32) {
         self.buffer
             .put_byte(((mode as u8) << 6) | ((r as u8 & 7) << 3) | (rm as u8 & 7));
@@ -177,6 +177,248 @@ impl X86Assembler {
             self.buffer.put_int(offset as _);
         }
     }
+
+    #[cfg(target_arch = "x86_64")]
+    #[inline]
+    pub fn reg_requires_rex(r: u8) -> bool {
+        r >= X86Gpr::R8 as u8
+    }
+    #[cfg(target_arch = "x86_64")]
+    #[inline]
+    pub fn byte_reg_requires_rex(r: u8) -> bool {
+        r >= X86Gpr::Esp as u8
+    }
+    #[cfg(target_arch = "x86_64")]
+    #[inline]
+    pub fn emit_rex(&mut self, w: u8, r: u8, x: u8, b: u8) {
+        self.buffer
+            .put_byte(PRE_REX | (w << 3) | ((r >> 3) << 2) | ((x >> 3) << 1) | (b >> 3));
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[inline]
+    pub fn emit_rexw(&mut self, r: u8, x: u8, b: u8) {
+        self.emit_rex(1, r, x, b);
+    }
+    #[cfg(target_arch = "x86_64")]
+    #[inline]
+    pub fn emit_rex_if(&mut self, c: bool, r: u8, x: u8, b: u8) {
+        if c {
+            self.emit_rex(0, r, x, b);
+        }
+    }
+    #[cfg(target_arch = "x86_64")]
+    #[inline]
+    pub fn emit_rex_if_needed(&mut self, r: u8, x: u8, b: u8) {
+        self.emit_rex_if(
+            Self::reg_requires_rex(r) || Self::reg_requires_rex(x) || Self::reg_requires_rex(b),
+            r,
+            x,
+            b,
+        );
+    }
+    #[cfg(target_arch = "x86")]
+    #[inline]
+    pub const fn reg_requires_rex(_: u8) -> bool {
+        false
+    }
+    #[cfg(target_arch = "x86")]
+    #[inline]
+    pub const fn byte_reg_requires_rex(_: u8) -> bool {
+        false
+    }
+    #[cfg(target_arch = "x86")]
+    #[inline]
+    pub const fn emit_rex_if(&mut self, _: u8, _: u8, _: u8) {}
+    #[cfg(target_arch = "x86")]
+    #[inline]
+    pub const fn emit_rex_if_needed(&mut self, _: u8, _: u8, _: u8) {}
+
+    pub fn executable_writable(&mut self) -> *mut u8 {
+        self.buffer.executable_writable_memory().unwrap()
+    }
+
+    pub fn executable_readable(&mut self) -> *const u8 {
+        self.buffer.executable_memory().unwrap()
+    }
+
+    pub fn code_size(&self) -> usize {
+        self.buffer.code_size()
+    }
+    pub fn data(&self) -> &[u8] {
+        self.buffer.data()
+    }
+
+    pub fn data_mut(&mut self) -> &mut [u8] {
+        self.buffer.data_mut()
+    }
+
+    pub fn imm_rel(&mut self) -> AssemblerLabel {
+        self.buffer.put_int(0);
+        self.label()
+    }
+
+    pub fn imm64(&mut self, imm: i64) {
+        self.buffer.put_long(imm as _);
+    }
+
+    pub fn imm32(&mut self, imm: i32) {
+        self.buffer.put_int(imm as _);
+    }
+
+    pub fn imm16(&mut self, imm: i16) {
+        self.buffer.put_short(imm as _);
+    }
+
+    pub fn imm8(&mut self, imm: i8) {
+        self.buffer.put_byte(imm as _);
+    }
+
+    pub fn label(&mut self) -> AssemblerLabel {
+        self.buffer.label()
+    }
+
+    pub fn one_byte_op8_1(&mut self, op: u8, g: u8, rm: u8) {
+        self.emit_rex_if(Self::byte_reg_requires_rex(rm), 0, 0, rm);
+        self.buffer.put_byte(op);
+        self.register_modrm(g, rm);
+    }
+    pub fn one_byte_op8_2(&mut self, op: u8, reg: u8, rm: u8) {
+        self.emit_rex_if(
+            Self::byte_reg_requires_rex(reg) || Self::byte_reg_requires_rex(rm),
+            reg,
+            0,
+            rm,
+        );
+        self.buffer.put_byte(op);
+        self.register_modrm(reg, rm);
+    }
+
+    pub fn one_byte_op8_3(
+        &mut self,
+        op: u8,
+        reg: u8,
+        base: u8,
+        index: u8,
+        scale: i32,
+        offset: i32,
+    ) {
+        self.emit_rex_if(
+            Self::byte_reg_requires_rex(reg)
+                || Self::byte_reg_requires_rex(base)
+                || Self::byte_reg_requires_rex(index),
+            reg,
+            index,
+            base,
+        );
+        self.buffer.put_byte(op);
+        self.memory_modrm_2(reg, base, index, scale, offset);
+    }
+
+    pub fn two_byte_op8_1(&mut self, op: u8, reg: u8, rm: u8) {
+        self.emit_rex_if(
+            Self::byte_reg_requires_rex(reg) || Self::byte_reg_requires_rex(rm),
+            reg,
+            0,
+            rm,
+        );
+        self.buffer.append(&[OP_2BYTE_ESCAPE, op]);
+        self.register_modrm(reg, rm);
+    }
+
+    pub fn two_byte_op8_2(&mut self, op: u8, g: u8, rm: u8) {
+        self.emit_rex_if(Self::byte_reg_requires_rex(rm), 0, 0, rm);
+        self.buffer.append(&[OP_2BYTE_ESCAPE, op]);
+        self.register_modrm(g, rm);
+    }
+
+    cfg_if::cfg_if! {
+        if #[cfg(target_arch="x86_64")]
+        {
+            pub fn one_byte_op64(&mut self,op: u8) {
+                self.emit_rexw(0, 0,0);
+                self.buffer.put_byte(op);
+            }
+            pub fn one_byte_op64_1(&mut self,op: u8,r: u8) {
+                self.emit_rexw(0, 0, r);
+                self.buffer.put_byte(op + (r & 7));
+            }
+
+            pub fn one_byte_op64_2(&mut self,op: u8,r: u8,rm: u8) {
+                self.emit_rexw(r, 0,rm);
+                self.buffer.put_byte(op);
+                self.register_modrm(r, rm);
+            }
+
+            pub fn one_byte_op64_3(&mut self,op: u8,reg: u8,base: u8,offset: i32) {
+                self.emit_rexw(reg, 0, base);
+                self.buffer.put_byte(op);
+                self.memory_modrm_1(reg,base,offset);
+            }
+
+            pub fn one_byte_op64_disp32(&mut self,op: u8,reg: u8,base: u8,offset: i32) {
+                self.emit_rexw(reg, 0,base);
+                self.buffer.put_byte(op);
+                self.memory_modrm_disp32(reg, base,offset);
+            }
+
+            pub fn one_byte_op64_disp8(&mut self,op: u8,reg: u8,base: u8,offset: i32) {
+                self.emit_rexw(reg, 0,base);
+                self.buffer.put_byte(op);
+                self.memory_modrm_disp8(reg, base,offset);
+            }
+
+            pub fn one_byte_op64_4(&mut self,op: u8,reg: u8,base: u8,index: u8,scale: i32,offset: i32) {
+                self.emit_rexw(reg, index,base);
+                self.buffer.put_byte(op);
+                self.memory_modrm_2(reg, base,index,scale,offset);
+            }
+
+            pub fn two_byte_op64(&mut self,op: u8,reg: u8,rm: u8) {
+                self.emit_rexw(reg,0,rm);
+                self.buffer.put_byte(OP_2BYTE_ESCAPE);
+                self.buffer.put_byte(op);
+                self.register_modrm(reg, rm);
+            }
+        } // x86assembler is included in build only on x86_32 and x86_64 so we do not need to check for other platforms
+    }
+
+    pub fn prefix(&mut self, x: u8) {
+        self.buffer.put_byte(x);
+    }
+    pub fn one_byte_op_1(&mut self, op: u8) {
+        self.buffer.put_byte(op);
+    }
+    pub fn one_byte_op_2(&mut self, op: u8, reg: u8) {
+        self.emit_rex_if_needed(0, 0, reg);
+        self.buffer.put_byte(op + (reg & 7));
+    }
+
+    pub fn one_byte_op_3(&mut self, op: u8, reg: u8, base: u8, offset: i32) {
+        self.emit_rex_if_needed(reg, 0, base);
+        self.buffer.put_byte(op);
+        self.memory_modrm_1(reg, base, offset);
+    }
+    pub fn one_byte_op_disp32(&mut self, op: u8, reg: u8, base: u8, offset: i32) {
+        self.emit_rex_if_needed(reg, 0, base);
+        self.buffer.put_byte(op);
+        self.memory_modrm_disp32(reg, base, offset);
+    }
+    pub fn one_byte_op_disp8(&mut self, op: u8, reg: u8, base: u8, offset: i32) {
+        self.emit_rex_if_needed(reg, 0, base);
+        self.buffer.put_byte(op);
+        self.memory_modrm_disp8(reg, base, offset);
+    }
+    pub fn one_byte_op_4(&mut self, op: u8, reg: u8, base: u8, index: u8, scale: i32, offset: i32) {
+        self.emit_rex_if_needed(reg, index, base);
+        self.buffer.put_byte(op);
+        self.memory_modrm_2(reg, base, index, scale, offset);
+    }
+
+    #[cfg(target_arch = "x86")]
+    pub fn one_byte_op_5(&mut self, _op: u8, _reg: u8, _address: usize) {
+        unimplemented!()
+    }
 }
 
 pub const fn can_sign_extend(x: i32) -> bool {
@@ -251,7 +493,7 @@ opcodes! {1
 }
 
 opcodes! {
-    2
+    1
     OP2_MOVSD_VsdWsd    = 0x10,
         OP2_MOVSD_WsdVsd    = 0x11,
         OP2_MOVSS_VsdWsd    = 0x10,
@@ -284,37 +526,233 @@ opcodes! {
 }
 
 opcodes! {1
-GROUP1_OP_ADD = 0,
-GROUP1_OP_OR  = 1,
-GROUP1_OP_ADC = 2,
-GROUP1_OP_AND = 4,
-GROUP1_OP_SUB = 5,
-GROUP1_OP_XOR = 6,
-GROUP1_OP_CMP = 7,
+    GROUP1_OP_ADD = 0,
+    GROUP1_OP_OR  = 1,
+    GROUP1_OP_ADC = 2,
+    GROUP1_OP_AND = 4,
+    GROUP1_OP_SUB = 5,
+    GROUP1_OP_XOR = 6,
+    GROUP1_OP_CMP = 7,
 
-GROUP1A_OP_POP = 0,
+    GROUP1A_OP_POP = 0,
 
-GROUP2_OP_ROL = 0,
-GROUP2_OP_ROR = 1,
-GROUP2_OP_RCL = 2,
-GROUP2_OP_RCR = 3,
+    GROUP2_OP_ROL = 0,
+    GROUP2_OP_ROR = 1,
+    GROUP2_OP_RCL = 2,
+    GROUP2_OP_RCR = 3,
 
-GROUP2_OP_SHL = 4,
-GROUP2_OP_SHR = 5,
-GROUP2_OP_SAR = 7,
+    GROUP2_OP_SHL = 4,
+    GROUP2_OP_SHR = 5,
+    GROUP2_OP_SAR = 7,
 
-GROUP3_OP_TEST = 0,
-GROUP3_OP_NOT  = 2,
-GROUP3_OP_NEG  = 3,
-GROUP3_OP_IDIV = 7,
+    GROUP3_OP_TEST = 0,
+    GROUP3_OP_NOT  = 2,
+    GROUP3_OP_NEG  = 3,
+    GROUP3_OP_IDIV = 7,
 
-GROUP5_OP_CALLN = 2,
-GROUP5_OP_JMPN  = 4,
-GROUP5_OP_PUSH  = 6,
+    GROUP5_OP_CALLN = 2,
+    GROUP5_OP_JMPN  = 4,
+    GROUP5_OP_PUSH  = 6,
 
-GROUP11_MOV = 0,
+    GROUP11_MOV = 0,
 
-GROUP14_OP_PSLLQ = 6,
-GROUP14_OP_PSRLQ = 2,
+    GROUP14_OP_PSLLQ = 6,
+    GROUP14_OP_PSRLQ = 2,
 
-ESCAPE_DD_FSTP_doubleReal = 3}
+    ESCAPE_DD_FSTP_doubleReal = 3
+}
+
+pub struct X86Assembler {
+    formatter: X86InsFormatter,
+    idx_of_last_watchpoint: i32,
+    idx_of_tail_last_watchpoint: i32,
+}
+
+impl X86Assembler {
+    fn store_possibly_unaligned<T: Sized>(location: *mut u8, idx: i32, value: T) {
+        unsafe {
+            let ptr = (location.cast::<T>()).offset(idx as _);
+            std::ptr::copy_nonoverlapping(&value, ptr, std::mem::size_of::<T>());
+        }
+    }
+
+    fn set_i32(location: *mut u8, value: i32) {
+        Self::store_possibly_unaligned(location, -1, value);
+    }
+
+    fn set_ptr(location: *mut u8, value: *mut u8) {
+        Self::store_possibly_unaligned(location, -1, value);
+    }
+
+    fn set_i8(location: *mut u8, value: i8) {
+        unsafe {
+            *location.cast::<i8>().offset(-1) = value;
+        }
+    }
+
+    fn set_rel32(from: *mut u8, to: *mut u8) {
+        let offset = to as usize - from as usize;
+        Self::set_i32(from, offset as _);
+    }
+
+    fn get_relocate_offset(code: *mut u8, lbl: AssemblerLabel) -> *mut u8 {
+        assert!(lbl.is_set());
+        return (code as usize + lbl.offset as usize) as *mut u8;
+    }
+
+    fn replace_with_address_computation(mut ptr: *mut u8) {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                if (*ptr & !15) == PRE_REX {
+                    ptr = ptr.offset(1);
+                }
+            }
+            match *ptr {
+                OP_MOV_GvEv => *ptr = OP_LEA,
+                OP_LEA => (),
+                _ => unreachable!(),
+            }
+        }
+    }
+    fn replace_with_load(mut ptr: *mut u8) {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                if (*ptr & !15) == PRE_REX {
+                    ptr = ptr.offset(1);
+                }
+            }
+            match *ptr {
+                OP_MOV_GvEv => (),
+                OP_LEA => *ptr = OP_MOV_GvEv,
+                _ => unreachable!(),
+            }
+        }
+    }
+    fn revert_jump_to_cmpl_im_force32(mut ptr: *mut u8, imm: i32, offset: i32, dst: u8) {
+        const OPCODE_BYTES: u8 = 1;
+        const MODRM_BYTES: u8 = 1;
+        unsafe {
+            *ptr.offset(0) = OP_GROUP11_EvIz;
+            *ptr.offset(1) = ((ModRmMode::NoDisp as u8) << 6) | (GROUP1_OP_CMP << 3) | dst;
+            let bytes: [u8; 4] = std::mem::transmute(imm);
+            for i in OPCODE_BYTES + MODRM_BYTES..5 {
+                *ptr.offset(i as isize) =
+                    bytes[i as usize - OPCODE_BYTES as usize - MODRM_BYTES as usize];
+            }
+        }
+    }
+
+    fn revert_jump_to_cmpl_ir_force32(mut ptr: *mut u8, imm: i32, dst: u8) {
+        const OPCODE_BYTES: u8 = 1;
+        const MODRM_BYTES: u8 = 1;
+        unsafe {
+            *ptr.offset(0) = OP_GROUP11_EvIz;
+            *ptr.offset(1) = ((ModRmMode::Reg as u8) << 6) | (GROUP1_OP_CMP << 3) | dst;
+            let bytes: [u8; 4] = std::mem::transmute(imm);
+            for i in OPCODE_BYTES + MODRM_BYTES..5 {
+                *ptr.offset(i as isize) =
+                    bytes[i as usize - OPCODE_BYTES as usize - MODRM_BYTES as usize];
+            }
+        }
+    }
+
+    fn revert_jump_to_movq_i64r(mut ptr: *mut u8, imm: i64, dst: u8) {
+        const REX_BYTES: u8 = 1;
+        const OPCODE_BYTES: u8 = 1;
+        unsafe {
+            *ptr.offset(0) = PRE_REX | (1 << 3) | (dst >> 3);
+            *ptr.offset(1) = OP_MOV_EAXIv | (dst & 7);
+            let bytes: [u8; 8] = std::mem::transmute(imm);
+            for i in REX_BYTES + OPCODE_BYTES..5 {
+                *ptr.offset(i as isize) =
+                    bytes[i as usize - REX_BYTES as usize - OPCODE_BYTES as usize];
+            }
+        }
+    }
+    fn read_ptr(loc: *mut u8) -> *mut u8 {
+        unsafe { *loc.cast::<*mut u8>().offset(-1) }
+    }
+    fn replace_with_jump(mut ptr: *mut u8, to: *mut u8) {
+        unsafe {
+            let dist = (to as usize - (ptr as usize + 5));
+            *ptr.offset(0) = OP_JMP_rel32;
+            *ptr.offset(1).cast::<i32>() = dist as i32;
+        }
+    }
+
+    fn repatch_ptr(location: *mut u8, value: *mut u8) {
+        Self::set_ptr(location, value)
+    }
+
+    fn repatch_i32(location: *mut u8, value: i32) {
+        Self::set_i32(location, value)
+    }
+
+    fn relink_jump(from: *mut u8, to: *mut u8) {
+        Self::set_rel32(from, to);
+    }
+    fn relink_call(from: *mut u8, to: *mut u8) {
+        Self::set_rel32(from, to);
+    }
+
+    fn link_ptr(code: *mut u8, w: AssemblerLabel, value: *mut u8) {
+        Self::set_ptr(unsafe { code.offset(w.offset as isize) }, value);
+    }
+    fn link_call(code: *mut u8, w: AssemblerLabel, value: *mut u8) {
+        Self::set_ptr(unsafe { code.offset(w.offset as isize) }, value);
+    }
+    fn slink_jump(code: *mut u8, w: AssemblerLabel, value: *mut u8) {
+        Self::set_ptr(unsafe { code.offset(w.offset as isize) }, value);
+    }
+
+    fn link_jump(&mut self, from: AssemblerLabel, to: AssemblerLabel) {
+        let code = self.formatter.data_mut().as_mut_ptr();
+        Self::set_rel32(unsafe { code.offset(from.offset as _) }, unsafe {
+            code.offset(to.offset as _)
+        });
+    }
+
+    pub fn align(&mut self, alignment: usize) -> AssemblerLabel {
+        while self.formatter.code_size() & (alignment - 1) == 0 {
+            self.formatter.one_byte_op_1(OP_HLT);
+        }
+
+        return self.label();
+    }
+
+    pub fn label(&mut self) -> AssemblerLabel {
+        let mut r = self.formatter.label();
+        while (r.offset as i32) < self.idx_of_tail_last_watchpoint {
+            self.formatter.one_byte_op_1(OP_NOP);
+            r = self.formatter.label();
+        }
+        r
+    }
+
+    pub fn label_ignoring_watchpoints(&mut self) -> AssemblerLabel {
+        self.formatter.label()
+    }
+
+    pub fn label_for_watchpoit(&mut self) -> AssemblerLabel {
+        let mut result = self.formatter.label();
+        if result.offset as i32 != self.idx_of_last_watchpoint {
+            result = self.label();
+        }
+        self.idx_of_last_watchpoint = result.offset as _;
+        self.idx_of_tail_last_watchpoint = result.offset as i32 + 5;
+        return result;
+    }
+
+    pub fn ret(&mut self) {
+        self.formatter.one_byte_op_1(OP_RET);
+    }
+    pub fn int3(&mut self) {
+        self.formatter.one_byte_op_1(OP_INT3);
+    }
+}
+
+pub const fn diff_between_labels(a: AssemblerLabel, b: AssemblerLabel) -> u32 {
+    b.offset - a.offset
+}

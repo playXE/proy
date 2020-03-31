@@ -75,9 +75,6 @@ pub fn protect(start: *mut u8, size: usize, access: Access) {
 
 #[cfg(target_family = "windows")]
 pub fn protect(start: *mut u8, size: usize, access: Access) {
-    debug_assert!(start.is_page_aligned());
-    debug_assert!(mem::is_page_aligned(size));
-
     use kernel32::VirtualAlloc;
     use winapi::um::winnt::{
         MEM_COMMIT, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_READONLY, PAGE_READWRITE,
@@ -96,7 +93,7 @@ pub fn protect(start: *mut u8, size: usize, access: Access) {
         Access::ReadWriteExecutable => PAGE_EXECUTE_READWRITE,
     };
 
-    let ptr = unsafe { VirtualAlloc(start.to_mut_ptr(), size as u64, MEM_COMMIT, protection) };
+    let ptr = unsafe { VirtualAlloc(start.cast(), size as u64, MEM_COMMIT, protection) };
 
     if ptr.is_null() {
         panic!("VirtualAlloc failed");

@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 libc = "0.2"
 lazy_static = "1.4"
+cfg-if = "0.1"
 [target.'cfg(target_family = "windows")'.dependencies]
 winapi = { version = "0.3", features = ["winuser","memoryapi","errhandlingapi","processthreadsapi","synchapi","sysinfoapi"] }
 kernel32-sys = "0.2"
