@@ -415,6 +415,12 @@ impl X86InsFormatter {
         self.memory_modrm_2(reg, base, index, scale, offset);
     }
 
+    pub fn one_byte_op_6(&mut self, op: u8, reg: u8, rm: u8) {
+        self.emit_rex_if_needed(reg, 0, rm);
+        self.buffer.put_byte(op);
+        self.register_modrm(reg, rm);
+    }
+
     #[cfg(target_arch = "x86")]
     pub fn one_byte_op_5(&mut self, _op: u8, _reg: u8, _address: usize) {
         unimplemented!()
@@ -563,12 +569,27 @@ opcodes! {1
 }
 
 pub struct X86Assembler {
-    formatter: X86InsFormatter,
+    pub formatter: X86InsFormatter,
     idx_of_last_watchpoint: i32,
     idx_of_tail_last_watchpoint: i32,
 }
 
 impl X86Assembler {
+    pub fn new() -> Self {
+        Self {
+            formatter: X86InsFormatter {
+                buffer: AssemblerBuffer {
+                    storage: Vec::with_capacity(128),
+                    index: 0,
+                },
+            },
+            idx_of_last_watchpoint: 0,
+            idx_of_tail_last_watchpoint: 0,
+        }
+    }
+    pub fn code(&self) -> &[u8] {
+        &self.formatter.data()
+    }
     fn store_possibly_unaligned<T: Sized>(location: *mut u8, idx: i32, value: T) {
         unsafe {
             let ptr = (location.cast::<T>()).offset(idx as _);
@@ -634,7 +655,7 @@ impl X86Assembler {
         const OPCODE_BYTES: u8 = 1;
         const MODRM_BYTES: u8 = 1;
         unsafe {
-            *ptr.offset(0) = OP_GROUP11_EvIz;
+            *ptr.offset(0) = OP_GROUP1_EvIz;
             *ptr.offset(1) = ((ModRmMode::NoDisp as u8) << 6) | (GROUP1_OP_CMP << 3) | dst;
             let bytes: [u8; 4] = std::mem::transmute(imm);
             for i in OPCODE_BYTES + MODRM_BYTES..5 {
@@ -648,7 +669,7 @@ impl X86Assembler {
         const OPCODE_BYTES: u8 = 1;
         const MODRM_BYTES: u8 = 1;
         unsafe {
-            *ptr.offset(0) = OP_GROUP11_EvIz;
+            *ptr.offset(0) = OP_GROUP1_EvIz;
             *ptr.offset(1) = ((ModRmMode::Reg as u8) << 6) | (GROUP1_OP_CMP << 3) | dst;
             let bytes: [u8; 4] = std::mem::transmute(imm);
             for i in OPCODE_BYTES + MODRM_BYTES..5 {
@@ -750,6 +771,208 @@ impl X86Assembler {
     }
     pub fn int3(&mut self) {
         self.formatter.one_byte_op_1(OP_INT3);
+    }
+
+    pub fn predict_not_taken(&mut self) {
+        self.formatter.prefix(PRE_PREDICT_BRANCH_NOT_TAKEN);
+    }
+
+    pub fn push_r(&mut self, r: u8) {
+        self.formatter.one_byte_op_2(OP_PUSH_EAX, r);
+    }
+    pub fn pop_r(&mut self, r: u8) {
+        self.formatter.one_byte_op_2(OP_POP_EAX, r);
+    }
+    pub fn push_i32(&mut self, imm: i32) {
+        self.formatter.one_byte_op_1(OP_PUSH_Iz);
+        self.formatter.imm32(imm);
+    }
+
+    pub fn push_m(&mut self, offset: i32, base: u8) {
+        self.formatter
+            .one_byte_op_3(OP_GROUP5_Ev, GROUP5_OP_PUSH, base, offset);
+    }
+
+    pub fn pop_m(&mut self, offset: i32, base: u8) {
+        self.formatter
+            .one_byte_op_3(OP_GROUP1A_Ev, GROUP1A_OP_POP, base, offset);
+    }
+
+    #[cfg(target_arch = "x86")]
+    pub fn adcl_im(&mut self, imm: i32, addr: *mut u8) {
+        if can_sign_extend(imm) {
+            self.formatter
+                .one_byte_op_5(OP_GROUP1_EvIb, GROUP1_OP_ADC, addr as _);
+            self.formatter.imm8(imm as u8);
+        } else {
+            self.formatter
+                .one_byte_op_5(OP_GROUP1_EvIz, GROUP1_OP_ADC, addr as _);
+            self.formatter.imm32(imm as u8);
+        }
+    }
+
+    pub fn addl_rr(&mut self, src: u8, dst: u8) {
+        self.formatter.one_byte_op_6(OP_ADD_EvGv, src, dst);
+    }
+
+    pub fn addl_mr(&mut self, offset: i32, base: u8, dst: u8) {
+        self.formatter.one_byte_op_3(OP_ADD_GvEv, dst, base, offset);
+    }
+
+    pub fn addl_rm(&mut self, src: u8, offset: i32, base: u8) {
+        self.formatter.one_byte_op_3(OP_ADD_EvGv, src, base, offset);
+    }
+    pub fn addl_ir(&mut self, imm: i32, dst: u8) {
+        if can_sign_extend(imm) {
+            self.formatter
+                .one_byte_op_6(OP_GROUP1_EvIb, GROUP1_OP_ADD, dst);
+            self.formatter.imm8(imm as _);
+        } else {
+            self.formatter
+                .one_byte_op_6(OP_GROUP1_EvIz, GROUP1_OP_ADD, dst);
+            self.formatter.imm32(imm as _);
+        }
+    }
+    cfg_if::cfg_if! {
+    if #[cfg(target_arch="x86_64")] {
+        pub fn addq_rr(&mut self,src: u8,dst: u8) {
+            self.formatter.one_byte_op64_2(OP_ADD_EvGv,src,dst);
+        }
+
+        pub fn addq_mr(&mut self,offset: i32,base: u8,dst: u8) {
+            self.formatter.one_byte_op64_3(OP_ADD_GvEv,dst,base,offset);
+        }
+        pub fn addq_ir(&mut self,imm: i32,dst: u8) {
+            if can_sign_extend(imm) {
+                self.formatter.one_byte_op64_2(OP_GROUP1_EvIb,GROUP1_OP_ADD,dst);
+                self.formatter.imm8(imm as _);
+            } else {
+                self.formatter.one_byte_op64_2(OP_GROUP1_EvIz,GROUP1_OP_ADD,dst);
+                self.formatter.imm8(imm as _);
+            }
+        }
+
+        pub fn addq_im(&mut self,imm: i32,offset: i32,base: u8) {
+            if can_sign_extend(imm) {
+                self.formatter.one_byte_op64_3(OP_GROUP1_EvIb,GROUP1_OP_ADD,base,offset);
+                self.formatter.imm8(imm as _);
+            } else {
+                self.formatter.one_byte_op64_3(OP_GROUP1_EvIz,GROUP1_OP_ADD,base,offset);
+                self.formatter.imm32(imm as _);
+            }
+        }
+    }
+    }
+    pub fn andl_rr(&mut self, src: u8, dst: u8) {
+        self.formatter.one_byte_op_6(OP_AND_EvGv, src, dst);
+    }
+
+    pub fn andl_mr(&mut self, offset: i32, base: u8, dst: u8) {
+        self.formatter.one_byte_op_3(OP_AND_GvEv, dst, base, offset);
+    }
+
+    pub fn andl_rm(&mut self, src: u8, offset: i32, base: u8) {
+        self.formatter.one_byte_op_3(OP_AND_EvGv, src, base, offset);
+    }
+
+    pub fn andl_ir(&mut self, imm: i32, dst: u8) {
+        if can_sign_extend(imm) {
+            self.formatter
+                .one_byte_op_6(OP_GROUP1_EvIb, GROUP1_OP_AND, dst);
+            self.formatter.imm8(imm as _);
+        } else {
+            self.formatter
+                .one_byte_op_6(OP_GROUP1_EvIz, GROUP1_OP_AND, dst);
+            self.formatter.imm32(imm);
+        }
+    }
+    pub fn andl_im(&mut self, imm: i32, offset: i32, base: u8) {
+        if can_sign_extend(imm) {
+            self.formatter
+                .one_byte_op_3(OP_GROUP1_EvIb, GROUP1_OP_AND, base, offset);
+            self.formatter.imm8(imm as _);
+        } else {
+            self.formatter
+                .one_byte_op_3(OP_GROUP1_EvIz, GROUP1_OP_AND, base, offset);
+        }
+    }
+    cfg_if::cfg_if! {
+        if #[cfg(target_arch="x86_64")] {
+            pub fn andq_rr(&mut self,src: u8,dst: u8) {
+                self.formatter.one_byte_op64_2(OP_AND_EvGv,src,dst);
+            }
+
+            pub fn andq_ir(&mut self,imm: i32,dst: u8) {
+                self.formatter.one_byte_op64_2(OP_GROUP1_EvIz,GROUP1_OP_AND,dst);
+                self.formatter.imm32(imm);
+            }
+        }
+    }
+
+    pub fn negl_r(&mut self, r: u8) {
+        self.formatter.one_byte_op_6(OP_GROUP3_Ev, GROUP3_OP_NEG, r);
+    }
+    #[cfg(target_arch = "x86_64")]
+    pub fn negq_r(&mut self, r: u8) {
+        self.formatter
+            .one_byte_op64_2(OP_GROUP3_Ev, GROUP3_OP_NEG, r);
+    }
+
+    pub fn notl_r(&mut self, r: u8) {
+        self.formatter.one_byte_op_6(OP_GROUP3_Ev, GROUP3_OP_NOT, r);
+    }
+
+    pub fn orl_rr(&mut self, src: u8, dst: u8) {
+        self.formatter.one_byte_op_6(OP_OR_EvGv, src, dst);
+    }
+    pub fn orl_ir(&mut self, imm: i32, dst: u8) {
+        self.formatter
+            .one_byte_op_6(OP_GROUP1_EvIz, GROUP1_OP_OR, dst);
+        self.formatter.imm32(imm);
+    }
+    #[cfg(target_arch = "x86_64")]
+    pub fn oqr_rr(&mut self, src: u8, dst: u8) {
+        self.formatter.one_byte_op64_2(OP_OR_EvGv, src, dst);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn orq_ir(&mut self, imm: i32, dst: u8) {
+        self.formatter
+            .one_byte_op64_2(OP_GROUP1_EvIz, GROUP1_OP_OR, dst);
+        self.formatter.imm32(imm);
+    }
+
+    pub fn subl_rr(&mut self, src: u8, dst: u8) {
+        self.formatter.one_byte_op_6(OP_SUB_EvGv, src, dst);
+    }
+
+    pub fn subl_ir(&mut self, imm: i32, dst: u8) {
+        if can_sign_extend(imm) {
+            self.formatter
+                .one_byte_op_6(OP_GROUP1_EvIb, GROUP1_OP_SUB, dst);
+            self.formatter.imm8(imm as _);
+        } else {
+            self.formatter
+                .one_byte_op_6(OP_GROUP1_EvIz, GROUP1_OP_SUB, dst);
+            self.formatter.imm8(imm as _);
+        }
+    }
+
+    pub fn subl_im(&mut self, imm: i32, offset: i32, base: u8) {
+        if can_sign_extend(imm) {
+            self.formatter
+                .one_byte_op_3(OP_GROUP1_EvIb, GROUP1_OP_SUB, base, offset);
+            self.formatter.imm8(imm as _);
+        } else {
+            self.formatter
+                .one_byte_op_3(OP_GROUP1_EvIz, GROUP1_OP_SUB, base, offset);
+            self.formatter.imm32(imm as _);
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn movq_rr(&mut self, src: u8, dst: u8) {
+        self.formatter.one_byte_op64_2(OP_MOV_EvGv, src, dst);
     }
 }
 

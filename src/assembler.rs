@@ -28,8 +28,8 @@ impl AssemblerLabel {
 }
 
 pub struct AssemblerBuffer {
-    storage: Vec<u8>,
-    index: usize,
+    pub(crate) storage: Vec<u8>,
+    pub(crate) index: usize,
 }
 
 impl AssemblerBuffer {
