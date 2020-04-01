@@ -969,6 +969,52 @@ impl X86Assembler {
             self.formatter.imm32(imm as _);
         }
     }
+    #[cfg(target_arch = "x86_64")]
+    pub fn subq_rr(&mut self, src: u8, dst: u8) {
+        self.formatter.one_byte_op64_2(OP_SUB_EvGv, src, dst);
+    }
+    #[cfg(target_arch = "x86_64")]
+    pub fn subq_ir(&mut self, imm: i32, dst: u8) {
+        self.formatter
+            .one_byte_op64_2(OP_GROUP1_EvIz, GROUP1_OP_ADD, dst);
+        self.formatter.imm32(imm);
+    }
+
+    pub fn xorl_rr(&mut self, src: u8, dst: u8) {
+        self.formatter.one_byte_op_6(OP_XOR_EvGv, src, dst);
+    }
+    pub fn xorl_mr(&mut self, offset: i32, base: u8, dst: u8) {
+        self.formatter.one_byte_op_3(OP_XOR_GvEv, dst, base, offset);
+    }
+
+    pub fn xorl_ir(&mut self, imm: i32, dst: u8) {
+        if can_sign_extend(imm) {
+            self.formatter
+                .one_byte_op_6(OP_GROUP1_EvIb, GROUP1_OP_XOR, dst);
+            self.formatter.imm8(imm as _);
+        } else {
+            self.formatter
+                .one_byte_op_6(OP_GROUP1_EvIz, GROUP1_OP_XOR, dst);
+            self.formatter.imm32(imm as _);
+        }
+    }
+    cfg_if::cfg_if! {
+        if #[cfg(target_arch="x86_64")]
+        {
+            pub fn xorq_rr(&mut self,src: u8,dst: u8) {
+                self.formatter.one_byte_op64_2(OP_XOR_EvGv,src,dst);
+            }
+            pub fn xorq_ir(&mut self,imm: i32,dst: u8) {
+                if can_sign_extend(imm) {
+                    self.formatter.one_byte_op64_2(OP_GROUP1_EbIb, GROUP1_OP_XOR,dst);
+                    self.formatter.imm8(imm as _);
+                } else {
+                    self.formatter.one_byte_op64_2(OP_GROUP1_EvIz, GROUP1_OP_XOR,dst);
+                    self.formatter.imm32(imm as _);
+                }
+            }
+        }
+    }
 
     #[cfg(target_arch = "x86_64")]
     pub fn movq_rr(&mut self, src: u8, dst: u8) {
