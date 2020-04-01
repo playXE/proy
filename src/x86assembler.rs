@@ -1013,9 +1013,80 @@ impl X86Assembler {
                     self.formatter.imm32(imm as _);
                 }
             }
+
+            pub fn rorq_i8r(&mut self,imm: i8,dst: u8) {
+                if imm == 1 {
+                    self.formatter.one_byte_op64_2(OP_GROUP2_Ev1,GROUP2_OP_ROR,dst);
+                } else {
+                    self.formatter.one_byte_op64_2(OP_GROUP2_EvIb,GROUP2_OP_ROR,dst);
+                    self.formatter.imm8(imm);
+                }
+            }
+
+            pub fn sarq_clr(&mut self,dst: u8) {
+                self.formatter.one_byte_op64_2(OP_GROUP2_EvCL,GROUP2_OP_ROR,dst);
+            }
+
+            pub fn sarq_i8r(&mut self,imm: i8,dst: u8)
+            {
+                if imm == 1 {
+                    self.formatter.one_byte_op64_2(OP_GROUP2_Ev1,GROUP2_OP_SAR,dst);
+                } else {
+                    self.formatter.one_byte_op64_2(OP_GROUP2_EvIb,GROUP2_OP_SAR,dst);
+                    self.formatter.imm8(imm);
+                }
+            }
+            pub fn shrq_i8r(&mut self,imm: i8,dst: u8)
+            {
+                if imm == 1 {
+                    self.formatter.one_byte_op64_2(OP_GROUP2_Ev1,GROUP2_OP_SHR,dst);
+                } else {
+                    self.formatter.one_byte_op64_2(OP_GROUP2_EvIb,GROUP2_OP_SHR,dst);
+                    self.formatter.imm8(imm);
+                }
+            }
+            pub fn shrq_clr(&mut self,dst: u8) {
+                self.formatter.one_byte_op64_2(OP_GROUP2_EvCL,GROUP2_OP_SHR,dst);
+            }
+            pub fn shlq_i8r(&mut self,imm: i8,dst: u8)
+            {
+                if imm == 1 {
+                    self.formatter.one_byte_op64_2(OP_GROUP2_Ev1,GROUP2_OP_SHL,dst);
+                } else {
+                    self.formatter.one_byte_op64_2(OP_GROUP2_EvIb,GROUP2_OP_SHL,dst);
+                    self.formatter.imm8(imm);
+                }
+            }
+            pub fn shlq_clr(&mut self,dst: u8) {
+                self.formatter.one_byte_op64_2(OP_GROUP2_EvCL,GROUP2_OP_SHL,dst);
+            }
         }
     }
 
+    pub fn sarl_i8r(&mut self, imm: i8, dst: u8) {
+        if imm == 1 {
+            self.formatter
+                .one_byte_op_6(OP_GROUP2_Ev1, GROUP2_OP_SAR, dst);
+        } else {
+            self.formatter
+                .one_byte_op_6(OP_GROUP2_EvIb, GROUP2_OP_SAR, dst);
+            self.formatter.imm8(imm);
+        }
+    }
+    pub fn sarl_clr(&mut self, dst: u8) {
+        self.formatter
+            .one_byte_op_6(OP_GROUP2_EvCL, GROUP2_OP_SAR, dst);
+    }
+    pub fn shrl_i8r(&mut self, imm: i8, dst: u8) {
+        if imm == 1 {
+            self.formatter
+                .one_byte_op_6(OP_GROUP2_Ev1, GROUP2_OP_SHR, dst);
+        } else {
+            self.formatter
+                .one_byte_op_6(OP_GROUP2_EvIb, GROUP2_OP_SHR, dst);
+            self.formatter.imm8(imm);
+        }
+    }
     #[cfg(target_arch = "x86_64")]
     pub fn movq_rr(&mut self, src: u8, dst: u8) {
         self.formatter.one_byte_op64_2(OP_MOV_EvGv, src, dst);
