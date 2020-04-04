@@ -85,6 +85,7 @@ impl AssemblerBuffer {
         }
         Some(result)
     }
+    // https://github.com/rust-lang/rust/issues/69228
     /*pub fn put_integral<T: 'static + Sized + Copy + Clone>(&mut self, x: T) {
         let bytes: [u8; std::mem::size_of::<T>()] = unsafe { std::mem::transmute(x) };
     }*/

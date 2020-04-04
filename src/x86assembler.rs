@@ -1087,6 +1087,65 @@ impl X86Assembler {
             self.formatter.imm8(imm);
         }
     }
+
+    pub fn shrl_clr(&mut self, dst: u8) {
+        self.formatter
+            .one_byte_op_6(OP_GROUP2_EvCL, GROUP2_OP_SHR, dst);
+    }
+    pub fn shll_i8r(&mut self, imm: i8, dst: u8) {
+        if imm == 1 {
+            self.formatter
+                .one_byte_op_6(OP_GROUP2_Ev1, GROUP2_OP_SHL, dst);
+        } else {
+            self.formatter
+                .one_byte_op_6(OP_GROUP2_EvIb, GROUP2_OP_SHL, dst);
+            self.formatter.imm8(imm);
+        }
+    }
+
+    pub fn shll_clr(&mut self, dst: u8) {
+        self.formatter
+            .one_byte_op_6(OP_GROUP2_EvCL, GROUP2_OP_SHL, dst);
+    }
+
+    pub fn imull_rr(&mut self, src: u8, dst: u8) {
+        self.formatter.two_byte_op8_1(OP2_IMUL_GvEv, dst, src);
+    }
+    pub fn imull_mr(&mut self, offset: i32, base: u8, dst: u8) {
+        self.formatter
+            .one_byte_op_3(OP2_IMUL_GvEv, dst, base, offset);
+    }
+    pub fn imull_i32r(&mut self, src: u8, imm: i32, dst: u8) {
+        self.formatter.one_byte_op_6(OP_IMUL_GvEvIz, dst, src);
+        self.formatter.imm32(imm);
+    }
+
+    pub fn idivl_r(&mut self, dst: u8) {
+        self.formatter
+            .one_byte_op_6(OP_GROUP3_Ev, GROUP3_OP_IDIV, dst);
+    }
+
+    pub fn cmpl_rr(&mut self, src: u8, dst: u8) {
+        self.formatter.one_byte_op_6(OP_CMP_EvGv, src, dst);
+    }
+
+    pub fn cmpl_rm(&mut self, src: u8, offset: i32, base: u8) {
+        self.formatter.one_byte_op_3(OP_CMP_EvGv, src, base, offset);
+    }
+    pub fn cmpl_mr(&mut self, offset: i32, base: u8, dst: u8) {
+        self.formatter.one_byte_op_3(OP_CMP_GvEv, dst, base, offset);
+    }
+    pub fn cmpl_ir(&mut self, imm: i32, dst: u8, force_i32: bool) {
+        if can_sign_extend(imm) && !force_i32 {
+            self.formatter
+                .one_byte_op_6(OP_GROUP1_EvIb, GROUP1_OP_CMP, dst);
+            self.formatter.imm8(imm as _);
+        } else {
+            self.formatter
+                .one_byte_op_6(OP_GROUP1_EvIz, GROUP1_OP_CMP, dst);
+            self.formatter.imm32(imm as _);
+        }
+    }
     #[cfg(target_arch = "x86_64")]
     pub fn movq_rr(&mut self, src: u8, dst: u8) {
         self.formatter.one_byte_op64_2(OP_MOV_EvGv, src, dst);

@@ -1,6 +1,5 @@
 extern crate proy;
 use capstone::prelude::*;
-use proy::mem;
 use proy::x86assembler::*;
 fn main() {
     let mut asm = X86Assembler::new();
